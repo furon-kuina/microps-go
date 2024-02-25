@@ -12,7 +12,7 @@ import (
 	"github.com/furon-kuina/microps-go/driver"
 )
 
-var dummyData = []byte{
+var LoopbackData = []byte{
 	0x45, 0x00, 0x00, 0x30,
 	0x00, 0x80, 0x00, 0x00,
 	0xff, 0x01, 0xbd, 0x4a,
@@ -27,12 +27,12 @@ var dummyData = []byte{
 	0x26, 0x2a, 0x28, 0x29,
 }
 
-func TestNetDevice(t *testing.T) {
+func TestLoopback(t *testing.T) {
 	err := net.Init()
 	if err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
-	dev := driver.NewDummyDevice()
+	dev := driver.NewLoopbackDevice()
 	if err = net.Run(); err != nil {
 		t.Errorf("run failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestNetDevice(t *testing.T) {
 				done <- true
 				return
 			case <-ticker.C:
-				err := net.Output(dev, net.DummyProtocol, dummyData, len(dummyData), nil)
+				err := net.Output(dev, net.DummyProtocol, LoopbackData, len(LoopbackData), dev)
 				if err != nil {
 					t.Errorf("transmit failed: %v", err)
 				}

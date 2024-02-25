@@ -7,6 +7,25 @@ import (
 	"github.com/furon-kuina/microps-go/util"
 )
 
+const (
+	Dummy NetDeviceType = iota + 1
+	Loopback
+	Ethernet
+)
+
+const (
+	DummyIrq Irq = iota + 1
+	LoopbackIrq
+)
+
+const (
+	UpFlag = 1 << iota
+	LoopbackFlag
+	BroadcastFlag
+	P2PFlag
+	needArpFlag
+)
+
 type Counter struct {
 	mu sync.Mutex
 	v  int
@@ -40,29 +59,19 @@ var (
 
 type NetDeviceType int
 
-const (
-	Dummy NetDeviceType = iota + 1
-	Loopback
-	Ethernet
-)
-
 type NetDevice interface {
 	Info() *NetDeviceInfo
 	Open() error
 	Close() error
-	Transmit(NetDeviceType, []byte, uint, NetDevice) error
+	Transmit(NetProtocolType, []byte, int, NetDevice) error
 }
 
 type NetDeviceInfo struct {
 	index         int
 	Name          string
 	Type          NetDeviceType
-	Mtu           uint
-	isUp          bool
-	isLoopback    bool
-	isBroadcast   bool
-	isP2P         bool
-	needsArp      bool
+	Mtu           int
+	Flags         uint32
 	HeaderLength  uint16
 	AddressLength uint16
 	addr          []uint16
@@ -83,7 +92,7 @@ func (ndc *NetDeviceInfo) Close() error {
 	return nil
 }
 
-func (ndc *NetDeviceInfo) Transmit(ndType NetDeviceType, data []byte, len uint, dst NetDevice) error {
+func (ndc *NetDeviceInfo) Transmit(npType NetProtocolType, data []byte, len int, dst NetDevice) error {
 	return nil
 }
 
@@ -97,63 +106,72 @@ func Register(nd NetDevice) error {
 }
 
 func (device NetDeviceInfo) State() string {
-	if device.isUp {
+	if device.Flags&UpFlag != 0 {
 		return "up"
 	} else {
 		return "down"
 	}
 }
 
-func Wrap(errp *error, format string, args ...any) {
-	if *errp != nil {
-		*errp = fmt.Errorf("%s: %w", fmt.Sprintf(format, args...), *errp)
+// dev:    どのNICからデータが届いたか
+// nptype: 届いたデータのプロトコル
+func HandleInput(dev NetDevice, nptype NetProtocolType, data []byte, len int) error {
+	info := dev.Info()
+	util.Debugf("dev=%s, type=%d, len=%d", info.Name, nptype, len)
+	for _, proto := range protocols {
+		if proto.nptype == nptype {
+			entry := NetProtocolQueueEntry{
+				dev:  dev,
+				data: data,
+				len:  len,
+			}
+			// nptype の受信キューにデータを積む
+			proto.q.Enqueue(entry)
+			util.Debugf("enqueued (num:%d), dev=%s, type=0x%04x, len=%d", proto.q.Len(), info.Name, nptype, len)
+		}
 	}
-}
-
-func HandleInput(nd NetDevice, ndtype NetDeviceType, data *uint8, len uint64) {
-	info := nd.Info()
-	util.Debugf("dev=%s, type=%d, len=%d", info.Name, ndtype, len)
+	return nil
 }
 
 func Open(nd NetDevice) (err error) {
 	info := nd.Info()
-	defer Wrap(&err, "Open(%q)", info.Name)
-	if info.isUp {
+	defer util.Wrap(&err, "Open(%q)", info.Name)
+	if info.Flags&UpFlag != 0 {
 		return fmt.Errorf("already open")
 	}
 	if err = nd.Open(); err != nil {
 		return err
 	}
-	info.isUp = true
+	info.Flags |= UpFlag
 	util.Debugf("dev=%s, state=%s", info.Name, info.State())
 	return nil
 }
 
 func Close(nd NetDevice) (err error) {
 	info := nd.Info()
-	defer Wrap(&err, "Close(%q)", info.Name)
-	if !info.isUp {
+	defer util.Wrap(&err, "Close(%q)", info.Name)
+	if info.Flags&UpFlag == 0 {
 		return fmt.Errorf("not open")
 	}
 	if err = nd.Close(); err != nil {
 		return err
 	}
-	info.isUp = false
+	info.Flags ^= UpFlag
 	util.Debugf("dev=%s, state=%s", info.Name, info.State())
 	return nil
 }
 
-func Output(nd NetDevice, ndtype NetDeviceType, data []byte, len uint, dst NetDevice) (err error) {
+func Output(nd NetDevice, nptype NetProtocolType, data []byte, len int, dst NetDevice) (err error) {
 	info := nd.Info()
-	defer Wrap(&err, "Output(%q)", info.Name)
-	if !info.isUp {
+	defer util.Wrap(&err, "Output(%q)", info.Name)
+	if info.Flags&UpFlag == 0 {
 		return fmt.Errorf("not open")
 	}
 	if len > info.Mtu {
 		return fmt.Errorf("too long, mtu=%d, len=%d", info.Mtu, len)
 	}
 	util.Infof("transmitting data %v", data)
-	if err = nd.Transmit(ndtype, data, len, dst); err != nil {
+	if err = nd.Transmit(nptype, data, len, dst); err != nil {
 		return fmt.Errorf("transmit failed: %v", err)
 	}
 	return nil
@@ -177,6 +195,50 @@ func Shutdown() {
 }
 
 func Init() error {
+	err := IpInit()
+	if err != nil {
+		return fmt.Errorf("IpInit: %v", err)
+	}
 	util.Infof("initialized")
 	return nil
+}
+
+type NetProtocol struct {
+	nptype  NetProtocolType
+	q       *util.ConcurrentQueue[NetProtocolQueueEntry]
+	handler protocolHandler
+}
+
+type NetProtocolType int
+type protocolHandler func(data []byte, len int, dev NetDevice)
+
+var protocols = make([]*NetProtocol, 0)
+
+const (
+	DummyProtocol NetProtocolType = iota + 1
+	IpProtocol
+	ArpProtocol
+	IpV6Protocol
+)
+
+func RegisterNetProtocol(nptype NetProtocolType, handler protocolHandler) error {
+	for _, proto := range protocols {
+		if nptype == proto.nptype {
+			return fmt.Errorf("protocol already registered, type=0x%04x", nptype)
+		}
+	}
+	proto := NetProtocol{
+		nptype:  nptype,
+		q:       util.NewConcurrentQueue[NetProtocolQueueEntry](),
+		handler: handler,
+	}
+	protocols = append(protocols, &proto)
+	util.Infof("protocol registered, type=0x%04x", nptype)
+	return nil
+}
+
+type NetProtocolQueueEntry struct {
+	dev  NetDevice
+	len  int
+	data []byte
 }

@@ -46,7 +46,7 @@ func (irqs *safeIrqEntries) getEntries() []irqEntry {
 
 func IntrRun() {
 	wg.Add(1)
-	go RunIrqHandler()
+	go runIrqHandler()
 	wg.Wait()
 }
 
@@ -58,7 +58,7 @@ func IntrRaiseIrq(irq Irq) {
 	irqChan <- irq
 }
 
-func RunIrqHandler() {
+func runIrqHandler() {
 	wg.Done()
 loop:
 	for {
