@@ -50,7 +50,6 @@ func TestNetDevice(t *testing.T) {
 				done <- true
 				return
 			case <-ticker.C:
-				fmt.Println("sending data...")
 				err := net.Output(dev, net.Dummy, testData, uint(len(testData)), nil)
 				if err != nil {
 					t.Errorf("transmit failed: %v", err)

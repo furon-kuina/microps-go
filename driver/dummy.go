@@ -10,15 +10,17 @@ import (
 
 const (
 	dummyMtu uint = math.MaxUint
+	dummyIrq      = 1
 )
 
 type DummyDevice struct {
 	net.NetDevice
 }
 
-func (dd *DummyDevice) Transmit(ndType net.NetDeviceType, data []byte, len uint, dst *any) error {
+func (dd *DummyDevice) Transmit(ndType net.NetDeviceType, data []byte, len uint, dst net.NetDevice) error {
 	info := dd.Info()
 	util.Infof("dev=%s, type=0x%04x, len=%d", info.Name, ndType, len)
+	net.IntrRaiseIrq(dummyIrq)
 	return nil
 }
 
@@ -36,6 +38,12 @@ func NewDummyDevice() *DummyDevice {
 		fmt.Printf("net.Register(): %v", err)
 		return nil
 	}
+	net.RegisterIrqHandler(dummyIrq, dd.DummyIsr, true, dd.Info().Name, dd)
 	util.Infof("initialized, dev=%s", dd.Info().Name)
 	return dd
+}
+
+func (dd *DummyDevice) DummyIsr(irq net.Irq, id net.NetDevice) error {
+	util.Debugf("irq=%d, dev=%s", irq, dd.Info().Name)
+	return nil
 }

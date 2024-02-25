@@ -32,8 +32,10 @@ func NewCounter() *Counter {
 }
 
 var (
-	deviceCounter *Counter = NewCounter()
+	deviceCounter = NewCounter()
 	devices       []NetDevice
+	c             = sync.NewCond(&sync.Mutex{})
+	irqReady      = false
 )
 
 type NetDeviceType int
@@ -48,7 +50,7 @@ type NetDevice interface {
 	Info() *NetDeviceInfo
 	Open() error
 	Close() error
-	Transmit(NetDeviceType, []byte, uint, *any) error
+	Transmit(NetDeviceType, []byte, uint, NetDevice) error
 }
 
 type NetDeviceInfo struct {
@@ -81,7 +83,7 @@ func (ndc *NetDeviceInfo) Close() error {
 	return nil
 }
 
-func (ndc *NetDeviceInfo) Transmit(ndType NetDeviceType, data []byte, len uint, dst *any) error {
+func (ndc *NetDeviceInfo) Transmit(ndType NetDeviceType, data []byte, len uint, dst NetDevice) error {
 	return nil
 }
 
@@ -141,7 +143,7 @@ func Close(nd NetDevice) (err error) {
 	return nil
 }
 
-func Output(nd NetDevice, ndtype NetDeviceType, data []byte, len uint, dst *any) (err error) {
+func Output(nd NetDevice, ndtype NetDeviceType, data []byte, len uint, dst NetDevice) (err error) {
 	info := nd.Info()
 	defer Wrap(&err, "Output(%q)", info.Name)
 	if !info.isUp {
@@ -158,6 +160,7 @@ func Output(nd NetDevice, ndtype NetDeviceType, data []byte, len uint, dst *any)
 }
 
 func Run() error {
+	IntrRun()
 	for _, dev := range devices {
 		Open(dev)
 	}
@@ -169,6 +172,7 @@ func Shutdown() {
 	for _, dev := range devices {
 		Close(dev)
 	}
+	IntrShutdown()
 	util.Infof("shutting down")
 }
 
