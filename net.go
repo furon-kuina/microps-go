@@ -16,6 +16,7 @@ const (
 const (
 	DummyIrq Irq = iota + 1
 	LoopbackIrq
+	SoftIrq
 )
 
 const (
@@ -115,7 +116,7 @@ func (device NetDeviceInfo) State() string {
 
 // dev:    どのNICからデータが届いたか
 // nptype: 届いたデータのプロトコル
-func HandleInput(dev NetDevice, nptype NetProtocolType, data []byte, len int) error {
+func InputHandler(dev NetDevice, nptype NetProtocolType, data []byte, len int) error {
 	info := dev.Info()
 	util.Debugf("dev=%s, type=%d, len=%d", info.Name, nptype, len)
 	for _, proto := range protocols {
@@ -128,6 +129,8 @@ func HandleInput(dev NetDevice, nptype NetProtocolType, data []byte, len int) er
 			// nptype の受信キューにデータを積む
 			proto.q.Enqueue(entry)
 			util.Debugf("enqueued (num:%d), dev=%s, type=0x%04x, len=%d", proto.q.Len(), info.Name, nptype, len)
+			// ソフトウェア割り込み
+			IntrRaiseIrq(SoftIrq)
 		}
 	}
 	return nil
@@ -241,4 +244,19 @@ type NetProtocolQueueEntry struct {
 	dev  NetDevice
 	len  int
 	data []byte
+}
+
+func SoftIrqHandler() error {
+	for _, proto := range protocols {
+		for {
+			if proto.q.IsEmpty() {
+				break
+			}
+			entry := proto.q.Dequeue()
+			util.Debugf("dequeued (num:%d), dev=%s, protocol=0x%04x, len=%d", proto.q.Len(), entry.dev.Info().Name, proto.nptype, entry.len)
+			util.Infof("received: %+v", entry.data)
+			proto.handler(entry.data, entry.len, entry.dev)
+		}
+	}
+	return nil
 }

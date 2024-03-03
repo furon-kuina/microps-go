@@ -27,7 +27,7 @@ var (
 		entries: []irqEntry{},
 		mu:      sync.Mutex{},
 	}
-	irqChan       = make(chan Irq)
+	irqChan       = make(chan Irq, 100)
 	terminateChan = make(chan interface{})
 	wg            sync.WaitGroup
 )
@@ -55,6 +55,7 @@ func IntrShutdown() {
 }
 
 func IntrRaiseIrq(irq Irq) {
+	util.Debugf("raise irq %d", irq)
 	irqChan <- irq
 }
 
@@ -66,6 +67,11 @@ loop:
 		case <-terminateChan:
 			break loop
 		case irq := <-irqChan:
+			util.Debugf("captured irq %d", irq)
+			if irq == SoftIrq {
+				SoftIrqHandler()
+				break
+			}
 			entries := irqEntries.getEntries()
 			for _, entry := range entries {
 				if entry.irq == irq {

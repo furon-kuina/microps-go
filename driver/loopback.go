@@ -76,7 +76,7 @@ func (ld *LoopbackDevice) LoopbackIsr(irq net.Irq, dev net.NetDevice) error {
 		}
 		entry := ld.q.Dequeue()
 		util.Debugf("dequeued: (num: %d), dev=%s, type=0x%04x, len=%d", ld.q.Len(), ld.Info().Name, entry.nptype, entry.len)
-		net.HandleInput(dev, entry.nptype, entry.data, entry.len)
+		net.InputHandler(dev, entry.nptype, entry.data, entry.len)
 	}
 
 	return nil
