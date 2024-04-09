@@ -7,11 +7,55 @@ import (
 	"github.com/furon-kuina/microps-go/util"
 )
 
+// デバイス関連
+
+type NetDeviceType string
+
 const (
-	Dummy NetDeviceType = iota + 1
-	Loopback
-	Ethernet
+	DummyDevice    = NetDeviceType("DUMMY")
+	LoopbackDevice = NetDeviceType("LOOPBACK")
+	EthernetDevice = NetDeviceType("ETHERNET")
 )
+
+type Device interface {
+	Info() *DeviceInfo
+	Interfaces() *NetworkInterfaceManager
+	Open() error
+	Close() error
+	Transmit(ProtocolType, []byte, int, Device) error
+}
+
+type DeviceInfo struct {
+	index         int
+	Name          string
+	Type          NetDeviceType
+	Mtu           int
+	Flags         uint32
+	HeaderLength  uint16
+	AddressLength uint16
+	addr          []uint16
+	peer          []uint8
+	broadcast     []uint8
+	priv          *any
+}
+
+func RegisterDevice(dev Device) (*DeviceInfo, error) {
+	info := dev.Info()
+	newInfo := info
+	newInfo.index = deviceCounter.GetValue()
+	deviceCounter.Increment()
+	newInfo.Name = fmt.Sprintf("net%d", newInfo.index)
+	devices = append(devices, dev)
+	return newInfo, nil
+}
+
+func (device DeviceInfo) State() string {
+	if device.Flags&UpFlag != 0 {
+		return "up"
+	} else {
+		return "down"
+	}
+}
 
 const (
 	DummyIrq Irq = iota + 1
@@ -51,74 +95,26 @@ func NewCounter() *Counter {
 	}
 }
 
+type NetworkDeviceManager struct {
+	devices []Device
+}
+
+func NewNetworkDeviceManager() NetworkDeviceManager {
+	return NetworkDeviceManager{}
+}
+
 var (
 	deviceCounter = NewCounter()
-	devices       []NetDevice
+	devices       []Device
 	c             = sync.NewCond(&sync.Mutex{})
 	irqReady      = false
 )
 
-type NetDeviceType int
-
-type NetDevice interface {
-	Info() *NetDeviceInfo
-	Open() error
-	Close() error
-	Transmit(NetProtocolType, []byte, int, NetDevice) error
-}
-
-type NetDeviceInfo struct {
-	index         int
-	Name          string
-	Type          NetDeviceType
-	Mtu           int
-	Flags         uint32
-	HeaderLength  uint16
-	AddressLength uint16
-	addr          []uint16
-	peer          []uint8
-	broadcast     []uint8
-	priv          *any
-}
-
-func (ndi *NetDeviceInfo) Info() *NetDeviceInfo {
-	return ndi
-}
-
-func (ndc *NetDeviceInfo) Open() error {
-	return nil
-}
-
-func (ndc *NetDeviceInfo) Close() error {
-	return nil
-}
-
-func (ndc *NetDeviceInfo) Transmit(npType NetProtocolType, data []byte, len int, dst NetDevice) error {
-	return nil
-}
-
-func Register(nd NetDevice) error {
-	info := nd.Info()
-	info.index = deviceCounter.GetValue()
-	deviceCounter.Increment()
-	info.Name = fmt.Sprintf("net%d", info.index)
-	devices = append(devices, nd)
-	return nil
-}
-
-func (device NetDeviceInfo) State() string {
-	if device.Flags&UpFlag != 0 {
-		return "up"
-	} else {
-		return "down"
-	}
-}
-
 // dev:    どのNICからデータが届いたか
 // nptype: 届いたデータのプロトコル
-func InputHandler(dev NetDevice, nptype NetProtocolType, data []byte, len int) error {
+func InputHandler(dev Device, nptype ProtocolType, data []byte, len int) error {
 	info := dev.Info()
-	util.Debugf("dev=%s, type=%d, len=%d", info.Name, nptype, len)
+	util.Debugf("dev=%s, type=%s, len=%d", info.Name, nptype, len)
 	for _, proto := range protocols {
 		if proto.nptype == nptype {
 			entry := NetProtocolQueueEntry{
@@ -136,7 +132,7 @@ func InputHandler(dev NetDevice, nptype NetProtocolType, data []byte, len int) e
 	return nil
 }
 
-func Open(nd NetDevice) (err error) {
+func Open(nd Device) (err error) {
 	info := nd.Info()
 	defer util.Wrap(&err, "Open(%q)", info.Name)
 	if info.Flags&UpFlag != 0 {
@@ -150,7 +146,7 @@ func Open(nd NetDevice) (err error) {
 	return nil
 }
 
-func Close(nd NetDevice) (err error) {
+func Close(nd Device) (err error) {
 	info := nd.Info()
 	defer util.Wrap(&err, "Close(%q)", info.Name)
 	if info.Flags&UpFlag == 0 {
@@ -164,17 +160,17 @@ func Close(nd NetDevice) (err error) {
 	return nil
 }
 
-func Output(nd NetDevice, nptype NetProtocolType, data []byte, len int, dst NetDevice) (err error) {
+func Output(nd Device, nptype ProtocolType, data []byte, dst Device) (err error) {
 	info := nd.Info()
 	defer util.Wrap(&err, "Output(%q)", info.Name)
 	if info.Flags&UpFlag == 0 {
 		return fmt.Errorf("not open")
 	}
-	if len > info.Mtu {
-		return fmt.Errorf("too long, mtu=%d, len=%d", info.Mtu, len)
+	if len(data) > info.Mtu {
+		return fmt.Errorf("too long, mtu=%d, len=%d", info.Mtu, len(data))
 	}
-	util.Infof("transmitting data %v", data)
-	if err = nd.Transmit(nptype, data, len, dst); err != nil {
+	util.Infof("transmitting data %q", string(data))
+	if err = nd.Transmit(nptype, data, len(data), dst); err != nil {
 		return fmt.Errorf("transmit failed: %v", err)
 	}
 	return nil
@@ -198,33 +194,35 @@ func Shutdown() {
 }
 
 func Init() error {
-	err := IpInit()
-	if err != nil {
-		return fmt.Errorf("IpInit: %v", err)
-	}
-	util.Infof("initialized")
+	// if err != nil {
+	// 	return fmt.Errorf("IpInit: %v", err)
+	// }
+	// util.Infof("initialized")
+	// return nil
 	return nil
 }
 
 type NetProtocol struct {
-	nptype  NetProtocolType
+	nptype  ProtocolType
 	q       *util.ConcurrentQueue[NetProtocolQueueEntry]
 	handler protocolHandler
 }
 
-type NetProtocolType int
-type protocolHandler func(data []byte, len int, dev NetDevice)
+// プロトコル関連
+
+type ProtocolType string
+type protocolHandler func(data []byte, len int, dev Device)
 
 var protocols = make([]*NetProtocol, 0)
 
 const (
-	DummyProtocol NetProtocolType = iota + 1
-	IpProtocol
-	ArpProtocol
-	IpV6Protocol
+	DummyProtocol = ProtocolType("DUMMY")
+	IpProtocol    = ProtocolType("IP")
+	ArpProtocol   = ProtocolType("ARP")
+	IpV6Protocol  = ProtocolType("IPV6")
 )
 
-func RegisterNetProtocol(nptype NetProtocolType, handler protocolHandler) error {
+func RegisterNetProtocol(nptype ProtocolType, handler protocolHandler) error {
 	for _, proto := range protocols {
 		if nptype == proto.nptype {
 			return fmt.Errorf("protocol already registered, type=0x%04x", nptype)
@@ -241,7 +239,7 @@ func RegisterNetProtocol(nptype NetProtocolType, handler protocolHandler) error 
 }
 
 type NetProtocolQueueEntry struct {
-	dev  NetDevice
+	dev  Device
 	len  int
 	data []byte
 }

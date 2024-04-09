@@ -13,10 +13,23 @@ const (
 )
 
 type DummyDevice struct {
-	net.NetDevice
+	*net.DeviceInfo
+	*net.NetworkInterfaceManager
 }
 
-func (dd *DummyDevice) Transmit(nptype net.NetProtocolType, data []byte, len int, dst net.NetDevice) error {
+func (dd *DummyDevice) Open() error {
+	return nil
+}
+
+func (dd *DummyDevice) Close() error {
+	return nil
+}
+
+func (dd *DummyDevice) Info() *net.DeviceInfo {
+	return dd.DeviceInfo
+}
+
+func (dd *DummyDevice) Transmit(nptype net.ProtocolType, data []byte, len int, dst net.Device) error {
 	info := dd.Info()
 	util.Infof("dev=%s, type=0x%04x, len=%d", info.Name, nptype, len)
 	net.IntrRaiseIrq(net.DummyIrq)
@@ -24,25 +37,30 @@ func (dd *DummyDevice) Transmit(nptype net.NetProtocolType, data []byte, len int
 }
 
 func NewDummyDevice() *DummyDevice {
-	info := net.NetDeviceInfo{
-		Type:          net.Dummy,
+	info := net.DeviceInfo{
+		Type:          net.DummyDevice,
 		Mtu:           dummyMtu,
 		HeaderLength:  0,
 		AddressLength: 0,
 	}
-	dd := &DummyDevice{
+	dd := DummyDevice{
 		&info,
+		net.NewNetworkInterfaceManager(),
 	}
-	if err := net.Register(dd); err != nil {
+	newInfo, err := net.RegisterDevice(&dd)
+	if err != nil {
 		fmt.Printf("net.Register(): %v", err)
 		return nil
 	}
-	net.RegisterIrqHandler(net.DummyIrq, dd.DummyIsr, true, dd.Info().Name, dd)
+	dd.DeviceInfo = newInfo
+
+	util.Infof("registered device %s", dd.Info().Name)
+	net.RegisterIrqHandler(net.DummyIrq, dd.DummyIsr, true, dd.Info().Name, &dd)
 	util.Infof("initialized, dev=%s", dd.Info().Name)
-	return dd
+	return &dd
 }
 
-func (dd *DummyDevice) DummyIsr(irq net.Irq, dev net.NetDevice) error {
+func (dd *DummyDevice) DummyIsr(irq net.Irq, dev net.Device) error {
 	util.Debugf("irq=%d, dev=%s", irq, dd.Info().Name)
 	return nil
 }

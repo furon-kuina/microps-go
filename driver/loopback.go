@@ -16,49 +16,29 @@ const (
 type LoopbackDevice struct {
 	irq net.Irq
 	q   *util.ConcurrentQueue[LoopbackEntry]
-	net.NetDevice
+	*net.DeviceInfo
+	net.NetworkInterfaceManager
 }
 
-type LoopbackEntry struct {
-	nptype net.NetProtocolType
-	len    int
-	data   []byte
+func (ld *LoopbackDevice) Info() *net.DeviceInfo {
+	return ld.DeviceInfo
 }
 
-func NewLoopbackDevice() *LoopbackDevice {
-	info := net.NetDeviceInfo{
-		Type:          net.Loopback,
-		Mtu:           loopbackMtu,
-		Flags:         net.LoopbackFlag,
-		HeaderLength:  0,
-		AddressLength: 0,
-	}
-
-	q := util.NewConcurrentQueue[LoopbackEntry]()
-
-	ld := &LoopbackDevice{
-		net.LoopbackIrq,
-		q,
-		&info,
-	}
-
-	if err := net.Register(ld); err != nil {
-		fmt.Printf("net.Register(): %v", err)
-		return nil
-	}
-	net.RegisterIrqHandler(ld.irq, ld.LoopbackIsr, true, ld.Info().Name, ld)
-	util.Infof("initialized, dev=%s", ld.Info().Name)
-	return ld
+func (ld *LoopbackDevice) Open() error {
+	return nil
 }
 
-func (ld *LoopbackDevice) Transmit(nptype net.NetProtocolType, data []byte, len int, dst net.NetDevice) (err error) {
+func (ld *LoopbackDevice) Close() error {
+	return nil
+}
+
+func (ld *LoopbackDevice) Transmit(nptype net.ProtocolType, data []byte, len int, dst net.Device) (err error) {
 	defer util.Wrap(&err, "Loopback transmit: dev=%s, dst=%s", ld.Info().Name, dst.Info().Name)
 	if ld.q.Len() >= loopbackQueueLimit {
 		return fmt.Errorf("queue is full")
 	}
 	entry := LoopbackEntry{
 		nptype: nptype,
-		len:    len,
 		data:   data,
 	}
 	ld.q.Enqueue(entry)
@@ -68,15 +48,49 @@ func (ld *LoopbackDevice) Transmit(nptype net.NetProtocolType, data []byte, len 
 	return nil
 }
 
-func (ld *LoopbackDevice) LoopbackIsr(irq net.Irq, dev net.NetDevice) error {
+type LoopbackEntry struct {
+	nptype net.ProtocolType
+	data   []byte
+}
+
+func NewLoopbackDevice() *LoopbackDevice {
+	info := net.DeviceInfo{
+		Type:          net.LoopbackDevice,
+		Mtu:           loopbackMtu,
+		Flags:         net.LoopbackFlag,
+		HeaderLength:  0,
+		AddressLength: 0,
+	}
+
+	q := util.NewConcurrentQueue[LoopbackEntry]()
+
+	ld := LoopbackDevice{
+		net.LoopbackIrq,
+		q,
+		&info,
+		net.NetworkInterfaceManager{},
+	}
+
+	newInfo, err := net.RegisterDevice(&ld)
+	if err != nil {
+		fmt.Printf("net.Register(): %v", err)
+		return nil
+	}
+	ld.DeviceInfo = newInfo
+	net.RegisterIrqHandler(ld.irq, ld.LoopbackIsr, true, ld.Info().Name, &ld)
+	util.Infof("initialized, dev=%s", ld.Info().Name)
+	return &ld
+}
+
+func (ld *LoopbackDevice) LoopbackIsr(irq net.Irq, dev net.Device) error {
 	util.Debugf("irq=%d, dev=%s", irq, ld.Info().Name)
 	for {
 		if ld.q.IsEmpty() {
 			break
 		}
 		entry := ld.q.Dequeue()
-		util.Debugf("dequeued: (num: %d), dev=%s, type=0x%04x, len=%d", ld.q.Len(), ld.Info().Name, entry.nptype, entry.len)
-		net.InputHandler(dev, entry.nptype, entry.data, entry.len)
+		util.Debugf("dequeued: (num: %d), dev=%s, type=0x%04x", ld.q.Len(), ld.Info().Name, entry.nptype)
+		net.InputHandler(dev, entry.nptype, entry.data, len(entry.data))
 	}
 
 	return nil

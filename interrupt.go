@@ -12,11 +12,11 @@ type irqEntry struct {
 	handler IrqHandler
 	shared  bool
 	name    string
-	dev     NetDevice
+	dev     Device
 }
 
 type Irq int
-type IrqHandler func(Irq, NetDevice) error
+type IrqHandler func(Irq, Device) error
 type safeIrqEntries struct {
 	entries []irqEntry
 	mu      sync.Mutex
@@ -84,7 +84,7 @@ loop:
 	util.Debugf("terminated")
 }
 
-func RegisterIrqHandler(irq Irq, handler IrqHandler, shared bool, name string, dev NetDevice) error {
+func RegisterIrqHandler(irq Irq, handler IrqHandler, shared bool, name string, dev Device) error {
 	entries := irqEntries.getEntries()
 	for _, entry := range entries {
 		if entry.irq != irq {

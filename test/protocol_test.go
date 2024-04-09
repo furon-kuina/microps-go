@@ -41,6 +41,7 @@ func TestProtocol(t *testing.T) {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan bool, 1)
 	ticker := time.NewTicker(1 * time.Second)
+	complete := time.After(20 * time.Second)
 
 	go func() {
 		for {
@@ -50,10 +51,13 @@ func TestProtocol(t *testing.T) {
 				done <- true
 				return
 			case <-ticker.C:
-				err := net.Output(dev, net.IpProtocol, IpData, len(IpData), dev)
+				err := net.Output(dev, net.IpProtocol, IpData, dev)
 				if err != nil {
 					t.Errorf("transmit failed: %v", err)
 				}
+			case <-complete:
+				done <- true
+				return
 			}
 		}
 	}()

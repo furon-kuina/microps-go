@@ -12,20 +12,7 @@ import (
 	"github.com/furon-kuina/microps-go/driver"
 )
 
-var dummyData = []byte{
-	0x45, 0x00, 0x00, 0x30,
-	0x00, 0x80, 0x00, 0x00,
-	0xff, 0x01, 0xbd, 0x4a,
-	0x7f, 0x00, 0x00, 0x01,
-	0x7f, 0x00, 0x00, 0x01,
-	0x08, 0x00, 0x35, 0x64,
-	0x00, 0x80, 0x00, 0x01,
-	0x31, 0x32, 0x33, 0x34,
-	0x35, 0x36, 0x37, 0x38,
-	0x39, 0x30, 0x21, 0x40,
-	0x23, 0x24, 0x25, 0x5e,
-	0x26, 0x2a, 0x28, 0x29,
-}
+var dummyData = []byte("Hello, world!")
 
 func TestNetDevice(t *testing.T) {
 	err := net.Init()
@@ -41,6 +28,7 @@ func TestNetDevice(t *testing.T) {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan bool, 1)
 	ticker := time.NewTicker(1 * time.Second)
+	complete := time.After(20 * time.Second)
 
 	go func() {
 		for {
@@ -50,10 +38,13 @@ func TestNetDevice(t *testing.T) {
 				done <- true
 				return
 			case <-ticker.C:
-				err := net.Output(dev, net.DummyProtocol, dummyData, len(dummyData), nil)
+				err := net.Output(dev, net.DummyProtocol, dummyData, nil)
 				if err != nil {
 					t.Errorf("transmit failed: %v", err)
 				}
+			case <-complete:
+				done <- true
+				return
 			}
 		}
 	}()
