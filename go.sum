@@ -1,0 +1,4 @@
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/m-mizutani/goerr v0.1.12 h1:lE+4uGHMJ+8uK8a9SHVIrxTDx15n/6zonK8VSY2zwjc=
+github.com/m-mizutani/goerr v0.1.12/go.mod h1:OoNepSLW5oF3dQWWZ3D2lVOTbzRsePvc6LrqhXcff5Y=

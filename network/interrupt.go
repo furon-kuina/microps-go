@@ -90,7 +90,13 @@ loop:
 				break
 			}
 			for _, handler := range entries.handlers {
-				go handler(irq)
+				go func() {
+					err := handler(irq)
+					if err != nil {
+						fmt.Printf("IRQ handler error: irq=%s: %v\n", irq.name, err)
+					}
+				}()
+
 			}
 		}
 	}

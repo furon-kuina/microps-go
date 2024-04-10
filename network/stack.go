@@ -39,7 +39,10 @@ func NewNetworkStack() *NetworkStack {
 		for _, proto := range ns.pm.protocols {
 			for proto.queue.Len() > 0 {
 				entry := proto.queue.Dequeue()
-				proto.handler(entry.dev, entry.data)
+				err := proto.handler(entry.dev, entry.data)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		return nil

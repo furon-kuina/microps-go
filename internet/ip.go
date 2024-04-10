@@ -1,5 +1,15 @@
 package internet
 
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"strconv"
+
+	"github.com/furon-kuina/microps-go/util"
+	"github.com/m-mizutani/goerr"
+)
+
 const (
 	IpVersionIpV4       = 4
 	IpHeaderSizeMinByte = 20
@@ -7,8 +17,13 @@ const (
 )
 
 const (
-	broadcast = 0xFFFFFFFF
+	mfBit      = 0x2000
+	offsetBits = 0x1FFF
 )
+
+type TransportProtocol uint8
+
+const ()
 
 // func IpInit() error {
 // 	err := net.RegisterNetProtocol(net.IpProtocol, IpHandler)
@@ -22,58 +37,78 @@ const (
 // 	util.Debugf("dev=%s, len=%d, data=%+v", dev, len, data)
 // }
 
-// type IpAddress uint32
+type IpAddress uint32
 
-// type IpHeader struct {
-// 	Vhl      uint8
-// 	Tos      uint8
-// 	Len      uint16
-// 	Id       uint16
-// 	Offset   uint16
-// 	Ttl      uint8
-// 	Protocol net.TransportProtocol
-// 	Sum      uint16
-// 	Src      IpAddress
-// 	Dst      IpAddress
-// 	Options  []byte
-// }
+type IpHeader struct {
+	Vhl      uint8
+	Tos      uint8
+	Len      uint16
+	Id       uint16
+	Offset   uint16
+	Ttl      uint8
+	Protocol TransportProtocol
+	Sum      uint16
+	Src      IpAddress
+	Dst      IpAddress
+}
 
-// type IpDatagram struct {
-// 	Header  IpHeader
-// 	Payload []byte
-// }
+type IpDatagram struct {
+	Header  IpHeader
+	Payload []byte
+}
 
-// func ParseIpHeader(data []uint8) (*IpDatagram, error) {
-// 	if len(data) < IpHeaderSizeMinByte {
-// 		return nil, net.ErrTooShort
-// 	}
-// 	hdr := IpHeader{}
-// 	buf := bytes.NewBuffer(data)
-// 	if err := binary.Read(buf, binary.BigEndian, &hdr); err != nil {
-// 		return nil, err
-// 	}
-// 	if hdr.Vhl>>4 != IpVersionIpV4 {
-// 		return nil, fmt.Errorf("unsupported version")
-// 	}
-// 	hlen := int((hdr.Vhl & 0x0F) << 2)
-// 	if len(data) < hlen {
-// 		return nil, net.ErrTooShort
-// 	}
-// 	cksum := net.Cksum16(data)
-// 	if cksum != 0 {
-// 		return nil, fmt.Errorf("checksum error: got %x", cksum)
-// 	}
-// 	if len(data) != int(hdr.Len) {
-// 		return nil, fmt.Errorf("wrong length")
-// 	}
-// 	if hdr.Ttl == 0 {
-// 		return nil, fmt.Errorf("dead packet")
-// 	}
-// 	return &IpDatagram{
-// 		Header:  hdr,
-// 		Payload: data[hlen:hdr.Len],
-// 	}, nil
-// }
+func ParseIpHeader(data []uint8) (*IpDatagram, error) {
+	if len(data) < IpHeaderSizeMinByte {
+		return nil, goerr.New("too short")
+	}
+	hdr := IpHeader{}
+	buf := bytes.NewBuffer(data)
+	if err := binary.Read(buf, binary.BigEndian, &hdr); err != nil {
+		return nil, err
+	}
+	if hdr.Vhl>>4 != IpVersionIpV4 {
+		return nil, fmt.Errorf("unsupported version")
+	}
+	hlen := int((hdr.Vhl & 0x0F) << 2)
+	if len(data) < hlen {
+		return nil, goerr.New("too short")
+	}
+	cksum := util.Cksum16(data)
+	if ^cksum != 0 {
+		return nil, fmt.Errorf("checksum error: got %x", cksum)
+	}
+	if len(data) != int(hdr.Len) {
+		return nil, fmt.Errorf("wrong length")
+	}
+	if hdr.Ttl == 0 {
+		return nil, fmt.Errorf("dead packet")
+	}
+	if (hdr.Offset&mfBit) != 0 && (hdr.Offset&offsetBits) != 0 {
+		return nil, goerr.New("fragment not supported")
+	}
+
+	return &IpDatagram{
+		Header:  hdr,
+		Payload: data[hlen:hdr.Len],
+	}, nil
+}
+
+func PrintIpDatagram(datagram IpDatagram) {
+	hdr := datagram.Header
+	fmt.Println("IP Header")
+	fmt.Printf("version: %1x\n", (hdr.Vhl >> 4))
+	fmt.Printf("header length: %d bytes\n", (hdr.Vhl&0x0F)<<2)
+	fmt.Printf("type of service: %2x\n", hdr.Tos)
+	fmt.Printf("total length: %4x\n", hdr.Len)
+	fmt.Printf("ID: %4x\n", hdr.Id)
+	fmt.Printf("offset: %b\n", hdr.Offset)
+	fmt.Printf("time to live: %2x\n", hdr.Ttl)
+	fmt.Printf("protocol: %2x\n", hdr.Protocol)
+	fmt.Printf("checksum: %4x\n", hdr.Sum)
+	fmt.Printf("source address: %s\n", ToIpString(hdr.Src))
+	fmt.Printf("destination address: %s\n", ToIpString(hdr.Dst))
+	fmt.Printf("data: %s\n", string(datagram.Payload))
+}
 
 // func PrintIpDatagram(datagram IpDatagram) {
 // }
@@ -173,19 +208,19 @@ const (
 // 	return IpAddress(res), nil
 // }
 
-// func ToIpString(addr IpAddress) string {
-// 	var res string
-// 	var mask IpAddress = 0xFF000000
-// 	for i := range 4 {
-// 		res += strconv.Itoa(int((mask & addr) >> ((3 - i) * 8)))
-// 		if i == 3 {
-// 			break
-// 		}
-// 		res += "."
-// 		mask >>= 8
-// 	}
-// 	return res
-// }
+func ToIpString(addr IpAddress) string {
+	var res string
+	var mask IpAddress = 0xFF000000
+	for i := range 4 {
+		res += strconv.Itoa(int((mask & addr) >> ((3 - i) * 8)))
+		if i == 3 {
+			break
+		}
+		res += "."
+		mask >>= 8
+	}
+	return res
+}
 
 // var ipInterfaces []IpInterface
 

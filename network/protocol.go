@@ -5,6 +5,7 @@ import (
 
 	"github.com/furon-kuina/microps-go/internet"
 	"github.com/furon-kuina/microps-go/util"
+	"github.com/m-mizutani/goerr"
 )
 
 type ProtocolManager struct {
@@ -17,7 +18,7 @@ func NewProtocolManager() *ProtocolManager {
 	}
 }
 
-type internetHandler func(dev Device, data []byte)
+type internetHandler func(dev Device, data []byte) error
 
 func (pm *ProtocolManager) Register(ptype internet.InternetProtocolType, handler internetHandler) error {
 	_, ok := pm.protocols[ptype]
@@ -41,6 +42,11 @@ type ProtocolQueueEntry struct {
 	data []byte
 }
 
-func IpInputHandler(dev Device, data []byte) {
-	util.Debugf("IpInputHandler: %s", string(data))
+func IpInputHandler(dev Device, data []byte) error {
+	datagram, err := internet.ParseIpHeader(data)
+	if err != nil {
+		return goerr.Wrap(err, "IpInputHandler")
+	}
+	internet.PrintIpDatagram(*datagram)
+	return nil
 }
